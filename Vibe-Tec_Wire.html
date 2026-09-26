@@ -539,6 +539,9 @@
           <button id="btn-edit-note" onclick="openSelectedNoteEditor()" class="hidden w-full py-1 px-1.5 rounded bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-700/50 font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm" title="Modifica Titolo e Testo della Nota (Enter)">
             <span>✏️</span> Nota
           </button>
+          <button id="btn-edit-label" onclick="openSelectedNoteEditor()" class="hidden w-full py-1 px-1.5 rounded bg-emerald-950 hover:bg-emerald-900 text-[#1bfd02] border border-emerald-600/50 font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm" title="Modifica Testo / Etichetta (Enter o Doppio Clic)">
+            <span>✏️</span> Testo
+          </button>
           <button id="btn-straighten-arrow" onclick="straightenSelectedArrow()" class="hidden w-full py-1 px-1.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-700/50 font-mono text-[10px] flex items-center justify-center gap-1" title="Raddrizza Freccia / Curva">
             <span>📏</span> Raddrizza
           </button>
@@ -574,6 +577,9 @@
           </div>
           
           <div class="w-6 h-px bg-slate-700/80 my-0.5"></div>
+          <button id="btn-duplicate-obj" onclick="duplicateSelected()" class="w-full py-1 px-1 rounded bg-emerald-950/80 hover:bg-emerald-900 text-[#1bfd02] border border-emerald-600/40 font-bold text-center text-[10px] flex items-center justify-center gap-1 shadow-sm transition-colors" title="Duplica Selezionato (Ctrl+D o Ctrl+C/V)">
+            <span>📑</span> Duplica
+          </button>
           <button onclick="deleteSelected()" class="w-full py-1 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 font-bold text-center text-xs" title="Elimina selezionato (Del)">🗑️</button>
         </div>
 
@@ -602,6 +608,11 @@
         <!-- Frames injected here with absolute coordinates -->
       </div>
 
+    </div>
+ 
+    <!-- Toast Notification (Copied, Duplicated, Pasted) -->
+    <div id="vibetec-toast" class="hidden pointer-events-none fixed top-14 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 rounded-full bg-[#0C1017]/95 backdrop-blur-md border border-[#1bfd02]/50 text-[#1bfd02] text-xs font-bold shadow-2xl flex items-center gap-2 transition-all opacity-0 duration-150">
+      <span id="vibetec-toast-msg">Notifica</span>
     </div>
 
     <!-- =======================================================================
@@ -721,6 +732,10 @@
               <div class="p-2 rounded-lg bg-slate-900 border border-slate-800">
                 <strong class="text-white block mb-0.5">🧹 Gomma Ibrida (E)</strong>
                 SX: affetta tratti a penna. DX: cancella oggetto intero.
+              </div>
+              <div class="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/40 col-span-2">
+                <strong class="text-[#1bfd02] block mb-0.5">📋 Ctrl+C / Ctrl+V / Ctrl+D</strong>
+                Copia, incolla o duplica al volo qualsiasi elemento o tratto selezionato.
               </div>
             </div>
           </div>
@@ -866,6 +881,8 @@
       objects: [],
       
       selectedObjectId: null,
+      clipboard: null,
+      pasteCount: 0,
       isTransforming: false,
       transformType: null,
       dragStartX: 0,
@@ -1433,7 +1450,7 @@
 
     window.addEventListener('keydown', (e) => {
       // Is user typing in an input or textarea (e.g. Note Editor modal)?
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
         if (e.key === 'Escape') {
           closeNoteEditor();
           return;
@@ -1446,16 +1463,35 @@
         return; // NEVER trigger canvas shortcuts while typing in inputs!
       }
 
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) history.redo();
-        else history.undo();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
-        e.preventDefault();
-        history.redo();
-        return;
+      // Check shortcuts with Ctrl / Cmd (Undo, Redo, Copy, Paste, Duplicate)
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) history.redo();
+          else history.undo();
+          return;
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          history.redo();
+          return;
+        }
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          copySelected();
+          return;
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          e.preventDefault();
+          pasteClipboard();
+          return;
+        }
+        if (e.key === 'd' || e.key === 'D') {
+          e.preventDefault();
+          duplicateSelected();
+          return;
+        }
+        return; // Important: prevent single-letter tool shortcuts when Ctrl/Cmd is pressed
       }
 
       if (e.code === 'Space' && !state.isSpacePressed) {
@@ -1469,28 +1505,23 @@
       if (e.key === 'Enter' && state.selectedObjectId) {
         const obj = state.objects.find(o => o.id === state.selectedObjectId);
         if (obj) {
-          if (obj.type === 'postit') {
-            openNoteEditor(obj.id);
-          } else if (obj.type === 'text' || obj.type === 'wire_button' || obj.type === 'wire_button_secondary' || obj.type === 'wire_input' || obj.type === 'wire_component' || obj.type === 'timer_badge') {
-            const newText = prompt('Modifica testo:', obj.text);
-            if (newText !== null && newText.trim() !== '') {
-              obj.text = newText;
-              renderAll();
-              history.push();
-            }
+          if (obj.type === 'postit' || ['text', 'wire_button', 'wire_button_secondary', 'wire_input', 'wire_image', 'wire_avatar', 'wire_component', 'timer_badge', 'badge'].includes(obj.type)) {
+            openObjectTextEditor(obj.id);
           }
         }
       }
 
-      if (e.key === 'v' || e.key === 'V') setTool('select');
-      if (e.key === 'h' || e.key === 'H') setTool('hand');
-      if (e.key === 'r' || e.key === 'R') { switchCategory('shapes'); setTool('rect'); }
-      if (e.key === 's' || e.key === 'S') { switchCategory('shapes'); setTool('square'); }
-      if (e.key === 'c' || e.key === 'C') { switchCategory('shapes'); setTool('circle'); }
-      if (e.key === 't' || e.key === 'T') { switchCategory('draw'); setTool('text'); }
-      if (e.key === 'a' || e.key === 'A') { switchCategory('shapes'); setTool('arrow'); }
-      if (e.key === 'p' || e.key === 'P') { switchCategory('draw'); setTool('pen'); }
-      if (e.key === 'e' || e.key === 'E') setTool('eraser');
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === 'v' || e.key === 'V') setTool('select');
+        if (e.key === 'h' || e.key === 'H') setTool('hand');
+        if (e.key === 'r' || e.key === 'R') { switchCategory('shapes'); setTool('rect'); }
+        if (e.key === 's' || e.key === 'S') { switchCategory('shapes'); setTool('square'); }
+        if (e.key === 'c' || e.key === 'C') { switchCategory('shapes'); setTool('circle'); }
+        if (e.key === 't' || e.key === 'T') { switchCategory('draw'); setTool('text'); }
+        if (e.key === 'a' || e.key === 'A') { switchCategory('shapes'); setTool('arrow'); }
+        if (e.key === 'p' || e.key === 'P') { switchCategory('draw'); setTool('pen'); }
+        if (e.key === 'e' || e.key === 'E') setTool('eraser');
+      }
     });
 
     window.addEventListener('keyup', (e) => {
@@ -2392,7 +2423,7 @@
           sticky_yellow: { border: '#FEF08A', tag: '📌 UX INSIGHT', defaultTxt: 'Insight: Semplificare navigazione a un pollice' },
           sticky_green: { border: '#86EFAC', tag: '🟢 GOAL / METRICA', defaultTxt: 'Target: 80% completamento onboarding' },
           sticky_red: { border: '#FDA4AF', tag: '🔴 FRICTION / BLOCKER', defaultTxt: 'Bloccante: Troppi passaggi per conferma' },
-          sticky_purple: { border: '#D8B4FE', tag: '🟣 TELEMETRIA HUD', defaultTxt: 'Telemetria: FairPlay Score & % Presenze' }
+          sticky_purple: { border: '#D8B4FE', tag: '🟣 TELEMETRIA HUD', defaultTxt: 'Telemetria: Metriche e KPI utente' }
         };
         const t = themes[uxType] || themes.sticky_yellow;
         obj = {
@@ -2490,7 +2521,7 @@
           color: '#1bfd02',
           fill: true,
           strokeWidth: 2,
-          text: 'PARTECIPA ALLA PARTITA'
+          text: 'CTA'
         };
       }
       else if (uxType === 'input') {
@@ -2506,7 +2537,7 @@
           color: '#94A3B8',
           fill: true,
           strokeWidth: 1.5,
-          text: '🔍 Cerca partita o circolo...'
+          text: '🔍 Cerca...'
         };
       }
       else if (uxType === 'button_secondary') {
@@ -3335,17 +3366,72 @@
 
     let editingNoteId = null;
 
+    function openObjectTextEditor(objId) {
+      if (!objId) return;
+      const obj = state.objects.find(o => o.id === objId);
+      if (!obj) return;
+
+      if (obj.type === 'postit') {
+        openNoteEditor(obj.id);
+        return;
+      }
+
+      let promptMsg = 'Modifica Testo / Etichetta:';
+      let defaultVal = obj.text !== undefined ? obj.text : '';
+
+      switch (obj.type) {
+        case 'wire_button':
+          promptMsg = 'Testo Pulsante CTA:';
+          defaultVal = obj.text || 'CTA';
+          break;
+        case 'wire_button_secondary':
+          promptMsg = 'Testo Pulsante Secondario:';
+          defaultVal = obj.text || 'Button';
+          break;
+        case 'wire_input':
+          promptMsg = 'Placeholder o Testo Input:';
+          defaultVal = obj.text || '🔍 Cerca...';
+          break;
+        case 'wire_component':
+          promptMsg = 'Titolo Container / Card:';
+          defaultVal = obj.text || 'Container Box';
+          break;
+        case 'wire_image':
+          promptMsg = 'Etichetta Immagine (Wireframe):';
+          defaultVal = obj.text || '🖼️ Immagine';
+          break;
+        case 'wire_avatar':
+          promptMsg = 'Testo, Iniziali o Emoji Avatar:';
+          defaultVal = obj.text || '👤';
+          break;
+        case 'timer_badge':
+          promptMsg = 'Tempo o Etichetta Timer:';
+          defaultVal = obj.text || '⏱️ 60s';
+          break;
+        case 'badge':
+          promptMsg = 'Numero o Etichetta Badge:';
+          defaultVal = obj.text || '1';
+          break;
+        case 'text':
+          promptMsg = 'Modifica Testo:';
+          defaultVal = obj.text || 'Testo';
+          break;
+      }
+
+      const newText = prompt(promptMsg, defaultVal);
+      if (newText !== null) {
+        obj.text = newText;
+        renderAll();
+        history.push();
+      }
+    }
+
     function openNoteEditor(noteId) {
       const obj = state.objects.find(o => o.id === noteId);
       if (!obj) return;
 
       if (obj.type !== 'postit') {
-        const newText = prompt('Modifica Testo:', obj.text);
-        if (newText !== null && newText.trim() !== '') {
-          obj.text = newText;
-          renderAll();
-          history.push();
-        }
+        openObjectTextEditor(noteId);
         return;
       }
 
@@ -3404,7 +3490,7 @@
 
     function openSelectedNoteEditor() {
       if (state.selectedObjectId) {
-        openNoteEditor(state.selectedObjectId);
+        openObjectTextEditor(state.selectedObjectId);
       }
     }
 
@@ -3660,6 +3746,16 @@
         }
       }
 
+      const btnEditLabel = document.getElementById('btn-edit-label');
+      if (btnEditLabel) {
+        const hasText = obj && ['text', 'wire_button', 'wire_button_secondary', 'wire_input', 'wire_image', 'wire_avatar', 'wire_component', 'timer_badge', 'badge'].includes(obj.type);
+        if (hasText) {
+          btnEditLabel.classList.remove('hidden');
+        } else {
+          btnEditLabel.classList.add('hidden');
+        }
+      }
+
       renderAll();
     }
 
@@ -3668,6 +3764,8 @@
       selectionControls.classList.add('hidden');
       const btnEditNote = document.getElementById('btn-edit-note');
       if (btnEditNote) btnEditNote.classList.add('hidden');
+      const btnEditLabel = document.getElementById('btn-edit-label');
+      if (btnEditLabel) btnEditLabel.classList.add('hidden');
       renderAll();
     }
 
@@ -3686,6 +3784,235 @@
       state.objects = state.objects.filter(o => o.id !== state.selectedObjectId);
       deselectObject();
       history.push();
+    }
+
+    // =========================================================================
+    // 11.5 DUPLICATION & CLIPBOARD ENGINE (Ctrl+C, Ctrl+V, Ctrl+D & UI Button)
+    // =========================================================================
+    let toastTimeout = null;
+    function showToast(msg) {
+      const toast = document.getElementById('vibetec-toast');
+      const msgEl = document.getElementById('vibetec-toast-msg');
+      if (!toast || !msgEl) return;
+      msgEl.textContent = msg;
+      toast.classList.remove('hidden');
+      requestAnimationFrame(() => {
+        toast.classList.remove('opacity-0');
+        toast.classList.add('opacity-100');
+      });
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0');
+        setTimeout(() => {
+          toast.classList.add('hidden');
+        }, 150);
+      }, 1500);
+    }
+
+    function shiftObjectCoordinates(obj, dx, dy) {
+      if (obj.points && Array.isArray(obj.points)) {
+        obj.points.forEach(pt => {
+          pt.x = Math.round(pt.x + dx);
+          pt.y = Math.round(pt.y + dy);
+        });
+        updatePenBounds(obj);
+      } else if (obj.x1 !== undefined && obj.x2 !== undefined) {
+        obj.x1 = Math.round(obj.x1 + dx);
+        obj.y1 = Math.round(obj.y1 + dy);
+        obj.x2 = Math.round(obj.x2 + dx);
+        obj.y2 = Math.round(obj.y2 + dy);
+        if (obj.cx1 !== undefined) obj.cx1 = Math.round(obj.cx1 + dx);
+        if (obj.cy1 !== undefined) obj.cy1 = Math.round(obj.cy1 + dy);
+        if (obj.cx2 !== undefined) obj.cx2 = Math.round(obj.cx2 + dx);
+        if (obj.cy2 !== undefined) obj.cy2 = Math.round(obj.cy2 + dy);
+        updateArrowBounds(obj);
+      } else {
+        obj.x = Math.round((obj.x || 0) + dx);
+        obj.y = Math.round((obj.y || 0) + dy);
+      }
+    }
+
+    function recalculateObjectArtboard(obj) {
+      let worldX, worldY;
+      if (obj.frameId) {
+        const curAb = state.artboards.find(a => a.id === obj.frameId);
+        worldX = (curAb ? curAb.x : 0) + obj.x;
+        worldY = (curAb ? curAb.y : 0) + obj.y;
+      } else {
+        worldX = obj.x;
+        worldY = obj.y;
+      }
+
+      const w = obj.width || 40;
+      const h = obj.height || 40;
+      const centerX = worldX + w / 2;
+      const centerY = worldY + h / 2;
+
+      const targetAb = state.artboards.find(a =>
+        centerX >= a.x && centerX <= (a.x + a.width) &&
+        centerY >= a.y && centerY <= (a.y + a.height)
+      );
+
+      const oldFrameId = obj.frameId;
+      const newFrameId = targetAb ? targetAb.id : null;
+
+      if (oldFrameId !== newFrameId) {
+        const oldWorldX = oldFrameId ? (state.artboards.find(a => a.id === oldFrameId)?.x || 0) : 0;
+        const oldWorldY = oldFrameId ? (state.artboards.find(a => a.id === oldFrameId)?.y || 0) : 0;
+        const newWorldX = targetAb ? targetAb.x : 0;
+        const newWorldY = targetAb ? targetAb.y : 0;
+        const shiftX = oldWorldX - newWorldX;
+        const shiftY = oldWorldY - newWorldY;
+
+        if (obj.points && Array.isArray(obj.points)) {
+          obj.points.forEach(pt => {
+            pt.x = Math.round(pt.x + shiftX);
+            pt.y = Math.round(pt.y + shiftY);
+          });
+          updatePenBounds(obj);
+        }
+        if (obj.x1 !== undefined && obj.x2 !== undefined) {
+          obj.x1 = Math.round(obj.x1 + shiftX);
+          obj.y1 = Math.round(obj.y1 + shiftY);
+          obj.x2 = Math.round(obj.x2 + shiftX);
+          obj.y2 = Math.round(obj.y2 + shiftY);
+          if (obj.cx1 !== undefined) obj.cx1 = Math.round(obj.cx1 + shiftX);
+          if (obj.cy1 !== undefined) obj.cy1 = Math.round(obj.cy1 + shiftY);
+          if (obj.cx2 !== undefined) obj.cx2 = Math.round(obj.cx2 + shiftX);
+          if (obj.cy2 !== undefined) obj.cy2 = Math.round(obj.cy2 + shiftY);
+          updateArrowBounds(obj);
+        }
+
+        if (targetAb) {
+          obj.frameId = targetAb.id;
+          obj.x = Math.round(worldX - targetAb.x);
+          obj.y = Math.round(worldY - targetAb.y);
+        } else {
+          obj.frameId = null;
+          obj.x = Math.round(worldX);
+          obj.y = Math.round(worldY);
+        }
+      }
+    }
+
+    function duplicateObject(sourceObj, offset = 24) {
+      if (!sourceObj) return null;
+      const clone = JSON.parse(JSON.stringify(sourceObj));
+      clone.id = 'obj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+      shiftObjectCoordinates(clone, offset, offset);
+      recalculateObjectArtboard(clone);
+
+      if (clone.type === 'postit') {
+        updateNoteAutoBounds(clone);
+      }
+
+      return clone;
+    }
+
+    function duplicateSelected() {
+      if (!state.selectedObjectId) {
+        showToast('⚠️ Seleziona prima un elemento da duplicare');
+        return;
+      }
+      const sourceObj = state.objects.find(o => o.id === state.selectedObjectId);
+      if (!sourceObj) return;
+
+      const clone = duplicateObject(sourceObj, 24);
+      if (!clone) return;
+
+      state.objects.push(clone);
+      selectObject(clone.id);
+      renderAll();
+      history.push();
+      showToast('📑 Elemento duplicato!');
+    }
+
+    function copySelected() {
+      if (!state.selectedObjectId) {
+        showToast('⚠️ Seleziona prima un elemento da copiare');
+        return;
+      }
+      const sourceObj = state.objects.find(o => o.id === state.selectedObjectId);
+      if (!sourceObj) return;
+
+      state.clipboard = JSON.parse(JSON.stringify(sourceObj));
+      state.pasteCount = 0;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(JSON.stringify({
+            source: 'vibetec_wire',
+            object: state.clipboard
+          })).catch(() => {});
+        }
+      } catch (e) {}
+
+      showToast('📋 Elemento copiato');
+    }
+
+    function pasteClipboard() {
+      if (!state.clipboard) {
+        showToast('⚠️ Appunti vuoti: usa prima Ctrl+C su un elemento');
+        return;
+      }
+
+      state.pasteCount = (state.pasteCount || 0) + 1;
+      const offset = 24 * state.pasteCount;
+
+      const clone = JSON.parse(JSON.stringify(state.clipboard));
+      clone.id = 'obj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+      shiftObjectCoordinates(clone, offset, offset);
+      recalculateObjectArtboard(clone);
+
+      // Check if center is visible in current viewport
+      let worldX, worldY;
+      if (clone.frameId) {
+        const curAb = state.artboards.find(a => a.id === clone.frameId);
+        worldX = (curAb ? curAb.x : 0) + clone.x;
+        worldY = (curAb ? curAb.y : 0) + clone.y;
+      } else {
+        worldX = clone.x;
+        worldY = clone.y;
+      }
+      const w = clone.width || 40;
+      const h = clone.height || 40;
+      const centerX = worldX + w / 2;
+      const centerY = worldY + h / 2;
+
+      const vpRect = viewport.getBoundingClientRect();
+      const vMinX = -state.panX / state.zoom;
+      const vMinY = -state.panY / state.zoom;
+      const vMaxX = (vpRect.width - state.panX) / state.zoom;
+      const vMaxY = (vpRect.height - state.panY) / state.zoom;
+
+      const isVisible = (
+        centerX >= vMinX && centerX <= vMaxX &&
+        centerY >= vMinY && centerY <= vMaxY
+      );
+
+      if (!isVisible) {
+        const center = getViewportCenterWorld();
+        const targetX = Math.round(center.x - w / 2);
+        const targetY = Math.round(center.y - h / 2);
+        const dx = targetX - worldX;
+        const dy = targetY - worldY;
+        shiftObjectCoordinates(clone, dx, dy);
+        clone.frameId = null;
+        recalculateObjectArtboard(clone);
+      }
+
+      if (clone.type === 'postit') {
+        updateNoteAutoBounds(clone);
+      }
+
+      state.objects.push(clone);
+      selectObject(clone.id);
+      renderAll();
+      history.push();
+      showToast('📋 Elemento incollato!');
     }
 
     // =========================================================================
@@ -3757,19 +4084,9 @@
         });
 
         g.addEventListener('dblclick', (e) => {
-          if (obj.type === 'postit') {
+          if (obj.type === 'postit' || ['text', 'wire_button', 'wire_button_secondary', 'wire_input', 'wire_image', 'wire_avatar', 'wire_component', 'timer_badge', 'badge'].includes(obj.type)) {
             e.stopPropagation();
-            openNoteEditor(obj.id);
-            return;
-          }
-          if (obj.type === 'text' || obj.type === 'wire_button' || obj.type === 'wire_button_secondary' || obj.type === 'wire_input' || obj.type === 'wire_image' || obj.type === 'wire_component') {
-            e.stopPropagation();
-            const newText = prompt('Modifica testo:', obj.text);
-            if (newText !== null && newText.trim() !== '') {
-              obj.text = newText;
-              renderAll();
-              history.push();
-            }
+            openObjectTextEditor(obj.id);
           }
         });
 
@@ -4109,8 +4426,12 @@
 
         const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         txt.setAttribute('x', x + w/2); txt.setAttribute('y', y + h/2 + 6);
-        txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('font-size', '18');
-        txt.textContent = '👤';
+        txt.setAttribute('text-anchor', 'middle');
+        const avText = obj.text || '👤';
+        txt.setAttribute('font-size', avText.length <= 2 ? (w > 36 ? '16' : '12') : '11');
+        txt.setAttribute('font-weight', '700');
+        txt.setAttribute('fill', '#F8FAFC');
+        txt.textContent = avText;
         g.appendChild(txt);
       }
       else if (type === 'wire_button') {
@@ -4681,7 +5002,7 @@
         ctx.fillStyle = '#000000';
         ctx.font = 'bold 12px -apple-system, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(text || 'CTA BUTTON', x + w/2, y + h/2 + 4);
+        ctx.fillText(text || 'CTA', x + w/2, y + h/2 + 4);
         ctx.textAlign = 'start';
       }
       else if (type === 'wire_button_secondary') {
@@ -4724,6 +5045,13 @@
         ctx.moveTo(x, y); ctx.lineTo(x + w, y + h);
         ctx.moveTo(x + w, y); ctx.lineTo(x, y + h);
         ctx.stroke();
+        if (text) {
+          ctx.fillStyle = '#F8FAFC';
+          ctx.font = 'bold 11px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(text, x + w/2, y + h/2 + 4);
+          ctx.textAlign = 'start';
+        }
       }
       else if (type === 'wire_avatar') {
         ctx.fillStyle = '#1B2230';
@@ -4732,6 +5060,11 @@
         ctx.fill();
         ctx.strokeStyle = color || '#1bfd02';
         ctx.stroke();
+        ctx.fillStyle = '#F8FAFC';
+        ctx.font = 'bold 12px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(text || '👤', x + w/2, y + h/2 + 4);
+        ctx.textAlign = 'start';
       }
 
       ctx.restore();
