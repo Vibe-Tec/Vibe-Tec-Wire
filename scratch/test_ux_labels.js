@@ -33,10 +33,10 @@ const editableTypes = [
 
 editableTypes.forEach(t => {
   if (!content.includes(`case '${t}':`)) {
-    throw new Error(`Type ${t} missing from openObjectTextEditor switch cases!`);
+    throw new Error(`Type ${t} missing from getTextEditorCopy cases!`);
   }
 });
-console.log(`✔ All ${editableTypes.length} UX element types covered in openObjectTextEditor switch`);
+console.log(`✔ All ${editableTypes.length} UX element types covered in getTextEditorCopy`);
 
 // 3. Verify btn-edit-label exists and is in selection controls
 if (!content.includes('id="btn-edit-label"')) {
@@ -63,6 +63,11 @@ const sandbox = {
   Date: Date,
   String: String,
   prompt: (msg, def) => 'NEW_CUSTOM_LABEL',
+  openNoteEditor: () => {},
+  openTextEditorModal: ({ objId }) => {
+    const obj = sandbox.state.objects.find(o => o.id === objId);
+    if (obj) obj.text = 'NEW_CUSTOM_LABEL';
+  },
   renderAll: () => {},
   history: { push: () => {} },
   updateNoteAutoBounds: () => {},
@@ -75,9 +80,12 @@ if (!createUXMatch) throw new Error("Could not extract createUXObject");
 
 const openObjTextMatch = content.match(/function openObjectTextEditor\([\s\S]*?\n    \}/);
 if (!openObjTextMatch) throw new Error("Could not extract openObjectTextEditor");
+const copyMatch = content.match(/function getTextEditorCopy\([\s\S]*?\n    \}/);
+if (!copyMatch) throw new Error("Could not extract getTextEditorCopy");
 
 vm.createContext(sandbox);
 vm.runInContext(createUXMatch[0], sandbox);
+vm.runInContext(copyMatch[0], sandbox);
 vm.runInContext(openObjTextMatch[0], sandbox);
 
 // Test CTA creation

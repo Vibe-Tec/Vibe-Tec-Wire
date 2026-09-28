@@ -18,19 +18,23 @@
 ---
 
 ## 🏗️ 2. Architettura & Stack Tecnologico
-- **100% Locale & Offline**: File monolitico `Vibe-Tec_Wire.html` eseguibile senza server, database o installazioni locali.
+- **100% Locale & Offline**: File monolitico `Vibe-Tec_Wire.html` eseguibile senza server, database o installazioni. CSS Tailwind compilato inline (`#tailwind-offline`), nessun CDN.
 - **Motore SVG DOM Puro**:
   - Gestione diretta dei nodi SVG (`<rect>`, `<circle>`, `<path>`, `<g>`, `<marker>`).
   - Zero librerie grafiche pesanti o framework esterni: massima velocità, reattività e zero latenza.
   - Coordinate globali infinite con matrice di zoom e pan su canvas illimitato.
 - **Funzionalità Core Certificate (v3.9)**:
-  - 🔲 **Forme con Anteprima Tratteggiata**: Feedback visivo immediato durante la creazione.
-  - ✏️ **Penna a Mano Libera & Testo Editabile**.
-  - ✨ **Libreria di 52 Icone Vettoriali**: Nodi SVG multi-elemento scalabili nello shelf dedicato.
-  - 📊 **Stepper Colonne / Righe Indipendenti**: Configurazione granulare per singolo artboard (Colonne blu, Righe ritmo 8pt azzurre).
-  - 🧭 **Smart Guides magnetiche stile Figma**: Linee guida magnetiche di snap tra frame e componenti (`#smart-guides-layer`).
-  - ⚡ **Auto-Layout & Container UI Kit Grigio**: Box contenitori strutturati per card e sezioni (`wire_component`).
-  - 🖐️ **Heatmap Ergonomiche Hoober & Clark**: Validazione zone di comfort a una mano (Verde 49%, Ambra 36%, Rosso 15%).
+  - 🔲 **Forme con Anteprima Tratteggiata**: stroke tratteggiato solo durante il drag di creazione.
+  - ✏️ **Penna a Mano Libera & Testo Editabile** (modal interno, niente `prompt()` nativo).
+  - ✨ **Libreria di 52 Icone Vettoriali**: click-to-place sul canvas o sotto la selezione. Runtime = `ICONS_LIBRARY` inline; `assets/icons/` è solo riferimento visivo.
+  - 📊 **Stepper Colonne / Righe Indipendenti**: Colonne blu, Righe ritmo 8pt azzurre, toggle ON/OFF.
+  - 🧭 **Smart Guides magnetiche stile Figma**: snap tra frame, componenti e oggetti sul canvas mondo (`#smart-guides-layer`).
+  - ⚡ **Auto-Layout v1** su `wire_component`: direzione V/H, padding, gap, figli con `parentId`. I container si possono annidare. Guide magnetiche solo tra fratelli dello stesso parent (come Figma).
+  - ▭ **Frame libero** ridimensionabile (senza chrome device).
+  - 🖱️ **Marquee** di selezione multipla col tool Selezione.
+  - 🖐️ **Heatmap Ergonomiche Hoober & Clark**: solo artboard **mobile** (Verde / Ambra / Rosso).
+  - 📷 **Export PNG**: 3× per schermo singolo; lavagna intera scalata max 4000px.
+  - ⚡ **Tokens W3C** e **Inspector contrasto WCAG** calcolati, non statici.
 
 ---
 

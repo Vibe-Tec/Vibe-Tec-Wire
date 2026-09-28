@@ -62,7 +62,8 @@ const sandbox = {
     objects: [
       { id: 'obj_1', frameId: 'ab_1', x: 50, y: 100, width: 120, height: 48 },
       { id: 'obj_2', frameId: 'ab_1', x: 200, y: 300, width: 120, height: 48 },
-      { id: 'obj_3', frameId: 'ab_2', x: 50, y: 100, width: 120, height: 48 } // Other canvas!
+      { id: 'obj_3', frameId: 'ab_2', x: 300, y: 100, width: 120, height: 48 }, // Other canvas — distinct coords
+      { id: 'obj_world', frameId: null, x: 800, y: 400, width: 100, height: 60 }
     ]
   }
 };
@@ -71,6 +72,8 @@ vm.createContext(sandbox);
 
 // Execute smart guides engine in sandbox
 vm.runInContext(`
+function getDeviceChrome(ab) { return { border: 0, safeTop: 0, safeBottom: 0, safeLeft: 0 }; }
+function getArtboardContentSize(ab) { return { w: ab.width, h: ab.height }; }
 ${jsCode.slice(jsCode.indexOf('const SMART_SNAP_THRESHOLD = 6;'), jsCode.indexOf('function handleGlobalMouseMove'))}
 `, sandbox);
 
@@ -94,11 +97,14 @@ res = sandbox.applyObjectSmartGuides(draggedObj, 250, 104);
 if (res.y !== 100) throw new Error(`Expected Y snap to 100, got ${res.y}`);
 console.log('✔ Micro Snap: Top-to-Top alignment snapped from 104 to 100');
 
-// 4. Isolation Check: Ensure draggedObj inside ab_1 does NOT snap to obj_3 in ab_2!
-// obj_3 is at x: 50, y: 100 in ab_2. If ab_1 candidates mistakenly included ab_2, it would have duplicate snaps.
 const ab1Layer = elements['guides-ab_1'];
 if (!ab1Layer || ab1Layer.children.length === 0) throw new Error('Expected visual SVG guide line in guides-ab_1');
 console.log('✔ Micro Snap: SVG guide line generated in guides-ab_1');
+
+// 4. Isolation: obj_3 in ab_2 sits at x=300. Dragging at 303 inside ab_1 must NOT snap across artboards.
+res = sandbox.applyObjectSmartGuides(draggedObj, 303, 200);
+if (res.x !== 303) throw new Error(`Cross-artboard isolation failed: expected x to stay 303, got ${res.x}`);
+console.log('✔ Isolation: object in ab_1 did not snap to obj_3 in ab_2');
 
 // Test B: Macro Snap between artboards on the board
 const draggedAb = { id: 'ab_2', x: 600, y: 104, width: 390, height: 844 };
@@ -111,6 +117,18 @@ console.log('✔ Macro Snap: Top-to-Top alignment between artboards snapped from
 const worldLayer = elements['smart-guides-layer'];
 if (!worldLayer || worldLayer.children.length === 0) throw new Error('Expected visual SVG guide line in smart-guides-layer');
 console.log('✔ Macro Snap: SVG guide line generated in smart-guides-layer');
+
+// Test B2: World-canvas object snap (frameId null) to another world object
+const draggedWorld = { id: 'obj_world_drag', frameId: null, width: 100, height: 60 };
+let worldSnap = sandbox.applyObjectSmartGuides(draggedWorld, 803, 400);
+if (worldSnap.x !== 800) throw new Error(`Expected world snap X to 800, got ${worldSnap.x}`);
+if (!worldLayer.children.length) throw new Error('Expected SVG guide on smart-guides-layer for world snap');
+console.log('✔ World Snap: world object left-to-left snapped from 803 to 800');
+
+// World object must not treat artboard-local coords of obj_3 (x=300 in ab_2) as world coords
+worldSnap = sandbox.applyObjectSmartGuides(draggedWorld, 303, 400);
+if (worldSnap.x !== 303) throw new Error(`World object must not snap to artboard-local obj_3, got ${worldSnap.x}`);
+console.log('✔ Isolation: world object did not snap to artboard-local object at x=300');
 
 // Test C: Cleanup
 sandbox.clearAllSmartGuides();
